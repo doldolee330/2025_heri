@@ -26,7 +26,7 @@
 ### 1. 저장소 클론
 ```bash
 git clone <repository-url>
-cd Q4_code
+cd 2025_heri
 ```
 
 ### 2. 가상환경 생성 및 활성화
@@ -78,7 +78,7 @@ python preprocess_data.py --enrich \
 ```
 
 **참고**: `--enrich` 옵션은 Solr 가 필요합니다. 
-- Solr은 Q4_code 프로젝트 밖에 별도로 설치되어 있다고 가정합니다.
+- Solr은 2025_heri 프로젝트 밖에 별도로 설치되어 있다고 가정합니다.
 - 기본 경로는 `../../solr/db/query-db.sh`입니다.
 - 다른 경로를 사용하려면 `SOLR_QUERY_SCRIPT` 환경 변수로 지정하세요.
 
@@ -136,7 +136,7 @@ curl "http://localhost:5000/generate/동원1257/탐구형/이%20유물에%20대�
 ## 프로젝트 구조
 
 ```
-Q4_code/
+2025_heri/
 ├── app.py                 # 메인 API 서버
 ├── preprocess_data.py     # 데이터 전처리 스크립트 (참고용)
 ├── requirements.txt       # Python 의존성
