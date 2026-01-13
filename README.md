@@ -7,7 +7,6 @@
 ### 운영체제
 - **OS**: Linux (Ubuntu)
 - **Kernel**: 5.4.0-177-generic
-- **Architecture**: x86_64
 
 ### 개발 도구
 - **Python**: 3.10.14
