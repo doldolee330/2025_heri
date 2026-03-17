@@ -15,7 +15,7 @@ from urllib.parse import unquote
 import torch
 import requests
 from flask import Flask, request, jsonify
-from transformers import AutoProcessor, Gemma3ForConditionalGeneration, AutoTokenizer
+from transformers import Gemma3ForConditionalGeneration, AutoTokenizer
 
 app = Flask(__name__)
 
@@ -30,7 +30,7 @@ SOLR_QUERY_SCRIPT = os.getenv("SOLR_QUERY_SCRIPT", DEFAULT_SOLR_SCRIPT)
 
 # Global variables
 model = None
-processor = None
+#processor = None
 tokenizer = None
 evidence_dict = {}
 visitor_prompts = {}
@@ -124,49 +124,30 @@ def load_visitor_prompts(prompts_file: str) -> Dict[str, str]:
 
 def load_model():
     """Load model and processor/tokenizer"""
-    global model, processor, tokenizer
+    global model, tokenizer
     
     if model is not None:
-        return model, processor, tokenizer
+        return model, None, tokenizer
     
     print(f"Loading model from {MODEL_PATH}...")
     
-    try:
-        model = Gemma3ForConditionalGeneration.from_pretrained(
-            MODEL_PATH,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
-        )
-        
-        try:
-            processor = AutoProcessor.from_pretrained(MODEL_PATH)
-        except:
-            print("Processor not found in checkpoint, loading from base model...")
-            processor = AutoProcessor.from_pretrained(BASE_MODEL_NAME)
-        
-        print("Model and processor loaded successfully!")
-        return model, processor, None
-        
-    except Exception as e:
-        print(f"Error loading with processor: {e}")
-        print("Trying with tokenizer only...")
-        
-        try:
-            model = Gemma3ForConditionalGeneration.from_pretrained(
-                MODEL_PATH,
-                torch_dtype=torch.bfloat16,
-                device_map="auto",
-            )
-            tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_NAME)
-            if tokenizer.pad_token is None:
-                tokenizer.pad_token = tokenizer.eos_token
-            
-            print("Model and tokenizer loaded successfully!")
-            return model, None, tokenizer
-            
-        except Exception as e2:
-            print(f"Error loading model: {e2}")
-            raise
+    model = Gemma3ForConditionalGeneration.from_pretrained(
+        MODEL_PATH,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+    )
+
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    model.resize_token_embeddings(len(tokenizer))
+
+    #print("tokenizer vocab:", len(tokenizer))
+    #print("model vocab:", model.get_input_embeddings().weight.shape[0])
+
+    print("Model and tokenizer loaded successfully!")
+
+    return model, None, tokenizer
 
 
 def run_solr_query(query: str) -> Tuple[int, List[Dict]]:
@@ -416,66 +397,36 @@ def format_messages_for_tokenizer(messages: List[Dict]) -> str:
 
 
 def generate_response(visitor_type: str, artifact: str, question: str, evidence_text: str) -> str:
-    """Generate response using model"""
-    global model, processor, tokenizer
+    global model, tokenizer
     
     messages = format_messages_for_gemma3(visitor_type, artifact, question, evidence_text)
     
     try:
-        if processor is not None:
-            chat_text = processor.apply_chat_template(
-                messages,
-                add_generation_prompt=True
+        input_text = format_messages_for_tokenizer(messages)
+
+        inputs = tokenizer(
+            input_text,
+            return_tensors="pt",
+            truncation=True,
+            max_length=2048
+        ).to(model.device)
+
+        input_len = inputs["input_ids"].shape[-1]
+
+        with torch.inference_mode():
+            generation = model.generate(
+                **inputs,
+                max_new_tokens=500,
+                do_sample=True,
+                top_k=50,
+                pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=tokenizer.eos_token_id,
             )
+            generation = generation[0][input_len:]
 
-            inputs = processor.tokenizer(
-                chat_text,
-                return_tensors="pt"
-            ).to(model.device)
+        decoded = tokenizer.decode(generation, skip_special_tokens=True)
+        return decoded.strip()
 
-            input_len = inputs["input_ids"].shape[-1]
-
-            with torch.inference_mode():
-                generation = model.generate(
-                    **inputs,
-                    max_new_tokens=500,
-                    do_sample=True,
-                    top_k=50,
-                )
-                generation = generation[0][input_len:]
-
-            decoded = processor.decode(generation, skip_special_tokens=True)
-            return decoded.strip()
-
-        elif tokenizer is not None:
-            input_text = format_messages_for_tokenizer(messages)
-            
-            inputs = tokenizer(
-                input_text,
-                return_tensors="pt",
-                truncation=True,
-                max_length=2048
-            ).to(model.device)
-            
-            input_len = inputs["input_ids"].shape[-1]
-            
-            with torch.inference_mode():
-                generation = model.generate(
-                    **inputs,
-                    max_new_tokens=500,
-                    do_sample=True,
-                    top_k=50,
-                    pad_token_id=tokenizer.pad_token_id,
-                    eos_token_id=tokenizer.eos_token_id,
-                )
-                generation = generation[0][input_len:]
-            
-            decoded = tokenizer.decode(generation, skip_special_tokens=True)
-            return decoded.strip()
-            
-        else:
-            return "모델이 로드되지 않았습니다."
-            
     except Exception as e:
         print(f"Generation error: {e}")
         return f"응답 생성 중 오류가 발생했습니다: {str(e)}"
